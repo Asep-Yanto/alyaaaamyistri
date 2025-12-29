@@ -39,51 +39,65 @@ document.addEventListener('DOMContentLoaded', () => {
         const userMessageText = (retryCount === 3) ? userInput.value.trim() : conversationHistory[conversationHistory.length - 1].text;
         if (userMessageText === '') return;
 
-        if (retryCount === 3) {
-            appendMessage(userMessageText, 'user');
-            userInput.value = '';
-            adjustInputHeight();
-            showTypingIndicator();
+    let isSending = false;
+    let lastSendTime = 0;
+
+    const sendMessage = async () => {
+        if (isSending) return;
+
+        if (Date.now() - lastSendTime < 3000) {
+            appendMessage('tunggu bentar ya…', 'system', true);
+            return;
         }
+        lastSendTime = Date.now();
+
+        const userMessageText = userInput.value.trim();
+        if (userMessageText === '') return;
+
+        isSending = true;
+
+        appendMessage(userMessageText, 'user');
+        userInput.value = '';
+        adjustInputHeight();
+        showTypingIndicator();
 
         try {
             const userName = userNameInput.value.trim();
-            const systemPrompt = `${systemInstructions[currentMode]} ${userName ? `Nama user adalah ${userName}.` : ''}`;
-            const contents = conversationHistory.slice(-20).map(msg => ({
+            const systemPrompt =
+                `${systemInstructions[currentMode]} ${userName ? `Nama user adalah ${userName}.` : ''}`;
+
+            const contents = conversationHistory.slice(-8).map(msg => ({
                 role: msg.sender === 'user' ? 'user' : 'model',
                 parts: [{ text: msg.text }]
             }));
-            
+
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    contents: contents,
-                    systemInstruction: { parts: [{ text: systemPrompt }] },
-                    
+                    contents,
+                    systemInstruction: { parts: [{ text: systemPrompt }] }
                 })
             });
 
-            if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-            
+            if (!response.ok) {
+                if (response.status === 429) throw new Error('RATE_LIMIT');
+                throw new Error('HTTP_ERROR');
+            }
+
             const data = await response.json();
             removeTypingIndicator();
 
-            if (data.candidates && data.candidates[0].content.parts[0].text) {
-                const bruhText = data.candidates[0].content.parts[0].text.replace(/^bruh:\s*/, '').trim();
-                appendMessage(bruhText, 'bruh');
-            } else {
-                throw new Error('Jawaban kosong atau tidak valid dari API.');
-            }
-        } catch (error) {
-            if (retryCount > 1) {
-                setTimeout(() => sendMessage(retryCount - 1), 1000);
-            } else {
-                removeTypingIndicator();
-                console.error("Error fetching Alya's response:", error);
-                const errorMessage = `Maaf, koneksiku sedang bermasalah. Coba lagi nanti ya? (Log: ${error.message})`;
-                appendMessage(errorMessage, 'bruh', true);
-            }
+            const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!reply) throw new Error('EMPTY');
+
+            appendMessage(reply.replace(/^bruh:\s*/i, '').trim(), 'bruh');
+
+        } catch {
+            removeTypingIndicator();
+            appendMessage('lagi sibuk… tunggu dikit ya', 'bruh', true);
+        } finally {
+            isSending = false;
         }
     };
 
